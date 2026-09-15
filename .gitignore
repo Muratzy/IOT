@@ -1,0 +1,17 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Keil / STM32 generated build output
+Lunar/MDK-ARM/Lunar/
+Lunar/MDK-ARM/JLinkLog.txt
+Lunar/MDK-ARM/JLinkSettings.ini
+Lunar/MDK-ARM/*.uvguix.*
+Lunar/MDK-ARM/*.lst
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
