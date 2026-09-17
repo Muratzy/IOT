@@ -2,12 +2,13 @@
 __pycache__/
 *.py[cod]
 
-# Keil / STM32 generated build output
-Lunar/MDK-ARM/Lunar/
-Lunar/MDK-ARM/JLinkLog.txt
-Lunar/MDK-ARM/JLinkSettings.ini
-Lunar/MDK-ARM/*.uvguix.*
-Lunar/MDK-ARM/*.lst
+# Keil / STM32 generated build output (all version folders)
+**/MDK-ARM/Lunar/
+**/MDK-ARM/JLinkLog.txt
+**/MDK-ARM/JLinkSettings.ini
+**/MDK-ARM/*.uvguix.*
+**/MDK-ARM/*.lst
+**/MDK-ARM/*build*.log
 
 # Editor and operating-system files
 .vscode/
