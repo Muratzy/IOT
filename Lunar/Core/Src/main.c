@@ -76,6 +76,7 @@ static void MX_USART1_UART_Init(void);
 static void Temperature_Task(void);
 static void Pressure_Task(void);
 static void Water_Task(void);
+static void Pump_Task(void);
 
 /* USER CODE END PFP */
 
@@ -213,6 +214,46 @@ static void Water_Task(void)
     OLED_ShowString(2, 11, " L/min");
 }
 
+static void Pump_Task(void)
+{
+    static uint8_t pump_duty_percent = 0U;
+    static uint32_t pump_duration_ms = 0U;
+    NETWORK_PumpCommand command;
+    NETWORK_CommandStatus command_status;
+
+    command_status = NETWORK_ReadPumpCommand(&command);
+
+    if (command_status == NETWORK_COMMAND_VALID)
+    {
+        MOTOR_SliceReset();
+        pump_duty_percent = command.duty_percent;
+        pump_duration_ms = command.duration_ms;
+
+        if (pump_duty_percent > 0U)
+        {
+            (void)MOTOR_Slice(
+                pump_duty_percent,
+                pump_duration_ms);
+        }
+
+        (void)NETWORK_SendPumpAck(
+            pump_duty_percent,
+            pump_duration_ms,
+            1U);
+    }
+    else if (command_status == NETWORK_COMMAND_INVALID)
+    {
+        (void)NETWORK_SendPumpAck(0U, 0U, 0U);
+    }
+
+    if (MOTOR_GetSliceStatus() == MOTOR_SLICE_RUNNING)
+    {
+        (void)MOTOR_Slice(
+            pump_duty_percent,
+            pump_duration_ms);
+    }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -273,7 +314,7 @@ int main(void)
     Temperature_Task();
 	Pressure_Task();
 	Water_Task();
-	MOTOR_Slice(60U, 8000U);
+	Pump_Task();
 	
 	PERIODIC_START(network_send, 250U)
         NETWORK_SensorFrame frame;
@@ -288,6 +329,9 @@ int main(void)
         frame.pressure_status = (uint8_t)PRESSURE_GetStatus();
         frame.pressure_adc = PRESSURE_GetRawADC();
         frame.pressure_delta_adc = PRESSURE_GetDeltaADC();
+        frame.pump_duty_percent = MOTOR_GetDuty();
+        frame.pump_status = (uint8_t)MOTOR_GetSliceStatus();
+        frame.pump_remaining_ms = MOTOR_GetRemainingMs();
 
         (void)NETWORK_SendSensorData(&frame);
 

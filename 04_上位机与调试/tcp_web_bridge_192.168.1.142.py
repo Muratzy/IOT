@@ -35,8 +35,17 @@ latest = {
     "client_ip": "",
     "received_frames": 0,
     "frame_version": 0,
+    "pump_duty": 0,
+    "pump_status": "stopped",
+    "pump_remaining_ms": 0,
+    "pump_command_duty": 0,
+    "pump_command_duration_ms": 0,
+    "pump_command_status": "idle",
+    "pump_command_at": "",
 }
 lock = threading.Lock()
+client_lock = threading.Lock()
+active_client = None
 
 
 def temperature_status(code: int) -> str:
@@ -66,6 +75,14 @@ def flow_status(code: int) -> str:
     }.get(code, "error")
 
 
+def pump_status(code: int) -> str:
+    return {
+        0: "stopped",
+        1: "running",
+        2: "done",
+    }.get(code, "error")
+
+
 def parse_frame(line: str):
     """
     Parse the OLED-aligned frame from the current firmware:
@@ -86,7 +103,7 @@ def parse_frame(line: str):
     if current_fields.issubset(values):
         try:
             pressure_pa = int(values["P"])
-            return {
+            parsed = {
                 "temperature1": float(values["T1"]),
                 "temperature1_status": temperature_status(int(values["S1"])),
                 "temperature2": float(values["T2"]),
@@ -100,6 +117,15 @@ def parse_frame(line: str):
                 "pressure_delta": int(values["D"]),
                 "frame_version": 2,
             }
+            pump_fields = {"M", "MS", "MT"}
+            if pump_fields.issubset(values):
+                parsed.update({
+                    "pump_duty": int(values["M"]),
+                    "pump_status": pump_status(int(values["MS"])),
+                    "pump_remaining_ms": int(values["MT"]),
+                    "frame_version": 3,
+                })
+            return parsed
         except ValueError:
             return None
 
@@ -127,7 +153,52 @@ def parse_frame(line: str):
     return None
 
 
+def parse_pump_ack(line: str):
+    values = {}
+    for part in line.split(","):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        values[key.strip().upper()] = value.strip()
+
+    if not {"PUMP_ACK", "TIME", "OK"}.issubset(values):
+        return None
+
+    try:
+        return {
+            "duty": int(values["PUMP_ACK"]),
+            "duration_ms": int(values["TIME"]),
+            "accepted": int(values["OK"]) == 1,
+        }
+    except ValueError:
+        return None
+
+
+def send_pump_command(duty: int, duration_ms: int):
+    global active_client
+
+    command = f"PUMP={duty},TIME={duration_ms}\r\n".encode("ascii")
+    with client_lock:
+        if active_client is None:
+            return False, "CH9121 未连接"
+        try:
+            active_client.sendall(command)
+        except OSError as error:
+            return False, f"发送失败：{error}"
+
+    with lock:
+        latest["pump_command_duty"] = duty
+        latest["pump_command_duration_ms"] = duration_ms
+        latest["pump_command_status"] = "sent"
+        latest["pump_command_at"] = datetime.now().strftime("%H:%M:%S")
+
+    print("[TX]", command.decode("ascii").strip())
+    return True, "命令已发送，等待 STM32 确认"
+
+
 def tcp_server():
+    global active_client
+
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((TCP_HOST, TCP_PORT))
@@ -137,7 +208,13 @@ def tcp_server():
 
     while True:
         conn, addr = server.accept()
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         print(f"[TCP] Connected: {addr}")
+
+        with client_lock:
+            if active_client is not None:
+                active_client.close()
+            active_client = conn
 
         with lock:
             latest["connected"] = True
@@ -162,6 +239,17 @@ def tcp_server():
 
                     print("[RX]", line)
 
+                    pump_ack = parse_pump_ack(line)
+                    if pump_ack is not None:
+                        with lock:
+                            latest["pump_command_duty"] = pump_ack["duty"]
+                            latest["pump_command_duration_ms"] = pump_ack["duration_ms"]
+                            latest["pump_command_status"] = (
+                                "accepted" if pump_ack["accepted"] else "rejected"
+                            )
+                            latest["pump_command_at"] = datetime.now().strftime("%H:%M:%S")
+                        continue
+
                     parsed = parse_frame(line)
                     if parsed is None:
                         print("[WARN] 无法解析这一帧")
@@ -178,14 +266,27 @@ def tcp_server():
         except ConnectionError:
             pass
         finally:
-            conn.close()
+            with client_lock:
+                if active_client is conn:
+                    active_client = None
+                conn.close()
             with lock:
                 latest["connected"] = False
                 latest["client_ip"] = ""
+                latest["pump_command_status"] = "disconnected"
             print("[TCP] Disconnected")
 
 
 class Handler(BaseHTTPRequestHandler):
+    def send_json(self, status, data):
+        payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_GET(self):
         if self.path == "/" or self.path == "/dashboard.html":
             try:
@@ -212,6 +313,58 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self.send_error(404)
+
+    def do_POST(self):
+        if self.path != "/api/pump":
+            self.send_error(404)
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_json(400, {"ok": False, "message": "Content-Length 无效"})
+            return
+
+        if content_length <= 0 or content_length > 4096:
+            self.send_json(400, {"ok": False, "message": "请求正文长度无效"})
+            return
+
+        try:
+            body = json.loads(self.rfile.read(content_length).decode("utf-8"))
+            duty_value = body["duty"]
+            duration_value = body["duration_ms"]
+            if isinstance(duty_value, bool) or isinstance(duration_value, bool):
+                raise ValueError
+            duty = int(duty_value)
+            duration_ms = int(duration_value)
+            if duty != duty_value or duration_ms != duration_value:
+                raise ValueError
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            self.send_json(400, {
+                "ok": False,
+                "message": "需要整数 duty 和 duration_ms",
+            })
+            return
+
+        if duty < 0 or duty > 100:
+            self.send_json(400, {"ok": False, "message": "PWM 必须为 0~100"})
+            return
+        if duty == 0:
+            duration_ms = 0
+        elif duration_ms <= 0 or duration_ms > 3600000:
+            self.send_json(400, {
+                "ok": False,
+                "message": "运行时间必须为 1~3600000 ms",
+            })
+            return
+
+        sent, message = send_pump_command(duty, duration_ms)
+        self.send_json(200 if sent else 409, {
+            "ok": sent,
+            "message": message,
+            "duty": duty,
+            "duration_ms": duration_ms,
+        })
 
     def log_message(self, format, *args):
         return

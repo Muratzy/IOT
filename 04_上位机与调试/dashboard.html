@@ -278,6 +278,17 @@
     .control-readout output { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
     .control-readout span { color: var(--muted); font-size: 12px; }
     .control-card input[type="range"] { display: block; width: 100%; margin: 8px 0 15px; accent-color: var(--cyan); cursor: pointer; }
+    .pump-time-input {
+      display: flex; align-items: center; gap: 9px; margin: 14px 0;
+      color: var(--muted); font-size: 12px;
+    }
+    .pump-time-input input {
+      width: 130px; min-height: 38px; padding: 7px 10px;
+      border: 1px solid var(--line); border-radius: 8px;
+      color: var(--text); background: #0b1c30; font: inherit;
+    }
+    .pump-live-state { min-height: 93px; }
+    .pump-live-state strong { display: block; margin-top: 6px; font-size: 23px; }
     .control-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .control-actions button {
       min-height: 34px; padding: 6px 10px; border: 1px solid var(--line);
@@ -285,10 +296,10 @@
     }
     .control-actions button:hover { border-color: var(--cyan); }
     .control-actions button.primary { border-color: var(--cyan); }
+    .control-actions button.stop { border-color: rgba(255, 119, 131, .55); color: var(--red); }
+    .control-actions button:disabled { opacity: .45; cursor: default; }
     .control-actions button[aria-pressed="true"] { border-color: var(--cyan); background: rgba(39, 191, 222, .16); }
     .control-note { min-height: 20px; margin: 13px 0 0; }
-    .heater-control { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 93px; }
-    .heater-control strong { display: block; margin-top: 6px; font-size: 23px; }
     .history-controls { justify-content: flex-start; margin: 17px 0 13px; }
     .history-controls label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
     .history-controls input, .section-heading select, .history-controls button, .pager button {
@@ -413,32 +424,39 @@
 
     <section class="control-section" aria-labelledby="controlTitle">
       <div class="section-heading">
-        <div><h2 id="controlTitle">设备控制预设</h2><p class="section-hint">只在当前页面演示操作状态；未接入控制接口，不会驱动阀门或加热器。</p></div>
-        <span class="badge wait">前端演示 · 未下发设备</span>
+        <div><h2 id="controlTitle">水泵控制</h2><p class="section-hint">设置 PWM 占空比和运行时间，通过 CH9121 下发到 STM32；0% 表示立即关闭。</p></div>
+        <span id="pumpControlBadge" class="badge wait">等待 STM32</span>
       </div>
       <div class="control-grid">
         <div class="control-card">
-          <h3>流量控制阀</h3>
-          <p>调节期望阀门开度。当前传感器流量：<strong id="controlFlow">--.--</strong> L/min</p>
-          <div class="control-readout"><output id="valveOpening" for="valveSlider">0%</output><span>期望开度 · 0% 关闭，100% 全开</span></div>
-          <input id="valveSlider" type="range" min="0" max="100" step="any" value="0" aria-label="阀门期望开度，连续调节">
+          <h3>水泵 PWM</h3>
+          <p>当前传感器流量：<strong id="controlFlow">--.--</strong> L/min</p>
+          <div class="control-readout"><output id="pumpDutyOutput" for="pumpDutySlider">0%</output><span>0% 关闭，100% 满占空比</span></div>
+          <input id="pumpDutySlider" type="range" min="0" max="100" step="1" value="0" aria-label="水泵 PWM 占空比">
           <div class="control-actions">
-            <button type="button" data-valve-preset="25">25%</button>
-            <button type="button" data-valve-preset="50">50%</button>
-            <button type="button" data-valve-preset="75">75%</button>
-            <button type="button" data-valve-preset="100">100%</button>
-            <button id="valveApply" class="primary" type="button">确认预设</button>
+            <button type="button" data-pump-preset="0">0%</button>
+            <button type="button" data-pump-preset="25">25%</button>
+            <button type="button" data-pump-preset="50">50%</button>
+            <button type="button" data-pump-preset="75">75%</button>
+            <button type="button" data-pump-preset="100">100%</button>
           </div>
-          <div id="valveFeedback" class="control-note" role="status">尚未设置预设开度；设备实际开度未知。</div>
         </div>
         <div class="control-card">
-          <h3>温度加热开关</h3>
-          <p>监测温度 T1：<strong id="controlTemperature">--.-</strong> °C</p>
-          <div class="heater-control">
-            <div><span class="label">期望状态</span><strong id="heaterState">未设置</strong></div>
-            <div class="control-actions"><button id="heaterToggle" class="primary" type="button" aria-pressed="false">预设开启</button></div>
+          <h3>运行时间与执行状态</h3>
+          <label class="pump-time-input">运行时间
+            <input id="pumpDurationSeconds" type="number" min="0.1" max="3600" step="0.1" value="2" inputmode="decimal">
+            秒
+          </label>
+          <div class="pump-live-state">
+            <span class="label">STM32 实际状态</span>
+            <strong id="pumpActualState">等待状态帧</strong>
+            <div id="pumpRemaining" class="control-note">实际 PWM --% · 剩余 -- 秒</div>
           </div>
-          <div id="heaterFeedback" class="control-note" role="status">设备实际加热状态未知；操作仅改变页面预设。</div>
+          <div class="control-actions">
+            <button id="pumpApply" class="primary" type="button">发送到 STM32</button>
+            <button id="pumpStop" class="stop" type="button">立即关闭</button>
+          </div>
+          <div id="pumpFeedback" class="control-note" role="status">尚未发送水泵命令。</div>
         </div>
       </div>
     </section>
@@ -506,6 +524,39 @@
         ? `${source} · ${Math.floor(age / 1000)} 秒未更新` : source;
     }
 
+    function renderPumpState(data) {
+      const stateText = {
+        stopped: "已关闭",
+        running: "运行中",
+        done: "运行完成",
+        error: "状态错误"
+      };
+      const commandText = {
+        idle: "尚未发送水泵命令。",
+        sent: "命令已发送，等待 STM32 确认。",
+        accepted: "STM32 已确认并执行命令。",
+        rejected: "STM32 拒绝了命令。",
+        disconnected: "CH9121 未连接，无法下发命令。"
+      };
+      const pumpState = data.pump_status || "stopped";
+      const actualDuty = Number(data.pump_duty || 0);
+      const remainingMs = Number(data.pump_remaining_ms || 0);
+      const badge = el("pumpControlBadge");
+
+      el("pumpActualState").textContent = stateText[pumpState] || "等待状态帧";
+      el("pumpRemaining").textContent =
+        `实际 PWM ${actualDuty}% · 剩余 ${(remainingMs / 1000).toFixed(1)} 秒`;
+      badge.textContent = pumpState === "running" ? `运行中 · ${actualDuty}%` :
+        (pumpState === "done" ? "运行完成" : "水泵已关闭");
+      badge.className = "badge";
+      if (pumpState !== "running") badge.classList.add("wait");
+
+      if (data.pump_command_status && commandText[data.pump_command_status]) {
+        const suffix = data.pump_command_at ? ` · ${data.pump_command_at}` : "";
+        el("pumpFeedback").textContent = commandText[data.pump_command_status] + suffix;
+      }
+    }
+
     function render(data) {
       updateConnection(data);
       setBadge("t1Badge", data.temperature1_status);
@@ -516,7 +567,6 @@
       el("t2").textContent = sensorValue(data.temperature2, data.temperature2_status, 1);
       el("flow").textContent = sensorValue(data.flow, data.flow_status, 2);
       el("controlFlow").textContent = sensorValue(data.flow, data.flow_status, 2);
-      el("controlTemperature").textContent = sensorValue(data.temperature1, data.temperature1_status, 1);
 
       const pressureOK = data.pressure_status === "ok" && Number.isFinite(Number(data.pressure_pa));
       el("pressure").textContent = pressureOK ? String(Math.round(data.pressure_pa)).padStart(7, "0") : "-------";
@@ -532,9 +582,12 @@
       }
       el("frames").textContent = Number(data.received_frames || 0).toLocaleString("zh-CN");
       el("raw").textContent = data.raw || "尚未收到串口数据";
-      el("frameVersion").textContent = data.frame_version === 2 ? "OLED 同步帧 v2" : (data.frame_version === 1 ? "兼容旧固件帧" : "等待数据");
+      el("frameVersion").textContent = data.frame_version === 3 ? "含水泵状态帧 v3" :
+        (data.frame_version === 2 ? "OLED 同步帧 v2" :
+          (data.frame_version === 1 ? "兼容旧固件帧" : "等待数据"));
       el("clientIp").textContent = data.client_ip || "--";
       el("updatedAt").textContent = data.updated_at || "--";
+      renderPumpState(data);
     }
 
     const HISTORY_DB = "iotcm-v3-history";
@@ -1155,32 +1208,51 @@
       refreshCharts(true);
     });
     el("refreshNow").addEventListener("click", () => { refresh(); refreshCharts(true); showHistory(); });
-    let valvePreset = 0;
-    let heaterPreset = false;
-    const formatValveOpening = (value) => `${Number(value.toFixed(1))}%`;
-    function setValvePreset(value) {
-      valvePreset = Math.max(0, Math.min(100, Number(value) || 0));
-      el("valveSlider").value = String(valvePreset);
-      el("valveOpening").textContent = formatValveOpening(valvePreset);
-      document.querySelectorAll("[data-valve-preset]").forEach((button) => {
-        button.setAttribute("aria-pressed", String(Number(button.dataset.valvePreset) === valvePreset));
+    let pumpDuty = 0;
+    function setPumpDuty(value) {
+      pumpDuty = Math.round(Math.max(0, Math.min(100, Number(value) || 0)));
+      el("pumpDutySlider").value = String(pumpDuty);
+      el("pumpDutyOutput").textContent = `${pumpDuty}%`;
+      document.querySelectorAll("[data-pump-preset]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(Number(button.dataset.pumpPreset) === pumpDuty));
       });
     }
-    el("valveSlider").addEventListener("input", (event) => setValvePreset(event.target.value));
-    document.querySelectorAll("[data-valve-preset]").forEach((button) => {
-      button.addEventListener("click", () => setValvePreset(button.dataset.valvePreset));
+    async function sendPumpCommand(forceStop = false) {
+      const duty = forceStop ? 0 : pumpDuty;
+      const seconds = Number(el("pumpDurationSeconds").value);
+      if (duty > 0 && (!Number.isFinite(seconds) || seconds <= 0 || seconds > 3600)) {
+        el("pumpFeedback").textContent = "运行时间必须在 0.1~3600 秒之间。";
+        return;
+      }
+
+      const durationMs = duty === 0 ? 0 : Math.round(seconds * 1000);
+      const buttons = [el("pumpApply"), el("pumpStop")];
+      buttons.forEach((button) => { button.disabled = true; });
+      el("pumpFeedback").textContent = "正在发送命令…";
+
+      try {
+        const response = await fetch("/api/pump", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ duty, duration_ms: durationMs })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.message || `HTTP ${response.status}`);
+        if (forceStop) setPumpDuty(0);
+        el("pumpFeedback").textContent = `${result.message} · PWM ${duty}% · ${durationMs} ms`;
+      } catch (error) {
+        el("pumpFeedback").textContent = `发送失败：${error.message}`;
+      } finally {
+        buttons.forEach((button) => { button.disabled = false; });
+      }
+    }
+    el("pumpDutySlider").addEventListener("input", (event) => setPumpDuty(event.target.value));
+    document.querySelectorAll("[data-pump-preset]").forEach((button) => {
+      button.addEventListener("click", () => setPumpDuty(button.dataset.pumpPreset));
     });
-    el("valveApply").addEventListener("click", () => {
-      el("valveFeedback").textContent = `本地预设：阀门开度 ${formatValveOpening(valvePreset)} · ${new Date().toLocaleTimeString("zh-CN")}。未下发设备，实际开度未知。`;
-    });
-    el("heaterToggle").addEventListener("click", () => {
-      heaterPreset = !heaterPreset;
-      el("heaterState").textContent = heaterPreset ? "预设开启" : "预设关闭";
-      el("heaterToggle").textContent = heaterPreset ? "预设关闭" : "预设开启";
-      el("heaterToggle").setAttribute("aria-pressed", String(heaterPreset));
-      el("heaterFeedback").textContent = `本地预设：加热${heaterPreset ? "开启" : "关闭"} · ${new Date().toLocaleTimeString("zh-CN")}。未下发设备，实际状态未知。`;
-    });
-    setValvePreset(0);
+    el("pumpApply").addEventListener("click", () => sendPumpCommand(false));
+    el("pumpStop").addEventListener("click", () => sendPumpCommand(true));
+    setPumpDuty(0);
     document.querySelectorAll("[data-history-range]").forEach((button) => {
       button.addEventListener("click", () => setQuickRange(button.dataset.historyRange));
     });

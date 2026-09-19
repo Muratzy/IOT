@@ -26,6 +26,7 @@ void MOTOR_Init(void);
 void MOTOR_SetDuty(uint8_t duty_percent);
 void MOTOR_Forward(uint8_t duty_percent);
 void MOTOR_Stop(void);
+uint8_t MOTOR_GetDuty(void);
 
 /*
  * Non-blocking timed pump slice.
@@ -39,6 +40,8 @@ MOTOR_SliceStatus MOTOR_Slice(
     uint8_t duty_percent,
     uint32_t duration_ms);
 void MOTOR_SliceReset(void);
+MOTOR_SliceStatus MOTOR_GetSliceStatus(void);
+uint32_t MOTOR_GetRemainingMs(void);
 
 /* Compatibility helper: positive=forward, zero/negative=stop. */
 void MOTOR_SetSpeed(int16_t speed_percent);

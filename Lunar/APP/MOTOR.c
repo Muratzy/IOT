@@ -6,6 +6,7 @@ static MOTOR_SliceStatus motor_slice_status = MOTOR_SLICE_IDLE;
 static uint8_t motor_slice_duty = 0U;
 static uint32_t motor_slice_duration = 0U;
 static uint32_t motor_slice_start_tick = 0U;
+static uint8_t motor_current_duty = 0U;
 
 static uint32_t MOTOR_DutyToCompare(uint8_t duty_percent)
 {
@@ -29,15 +30,22 @@ void MOTOR_Init(void)
     motor_slice_duty = 0U;
     motor_slice_duration = 0U;
     motor_slice_start_tick = 0U;
+    motor_current_duty = 0U;
 }
 
 void MOTOR_SetDuty(uint8_t duty_percent)
 {
+    if (duty_percent > MOTOR_DUTY_MAX)
+    {
+        duty_percent = MOTOR_DUTY_MAX;
+    }
+
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
     __HAL_TIM_SET_COMPARE(
         &htim3,
         TIM_CHANNEL_1,
         MOTOR_DutyToCompare(duty_percent));
+    motor_current_duty = duty_percent;
 }
 
 void MOTOR_Forward(uint8_t duty_percent)
@@ -49,6 +57,12 @@ void MOTOR_Stop(void)
 {
     __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0U);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
+    motor_current_duty = 0U;
+}
+
+uint8_t MOTOR_GetDuty(void)
+{
+    return motor_current_duty;
 }
 
 MOTOR_SliceStatus MOTOR_Slice(
@@ -102,6 +116,29 @@ void MOTOR_SliceReset(void)
     motor_slice_duty = 0U;
     motor_slice_duration = 0U;
     motor_slice_start_tick = 0U;
+}
+
+MOTOR_SliceStatus MOTOR_GetSliceStatus(void)
+{
+    return motor_slice_status;
+}
+
+uint32_t MOTOR_GetRemainingMs(void)
+{
+    uint32_t elapsed_ms;
+
+    if (motor_slice_status != MOTOR_SLICE_RUNNING)
+    {
+        return 0U;
+    }
+
+    elapsed_ms = HAL_GetTick() - motor_slice_start_tick;
+    if (elapsed_ms >= motor_slice_duration)
+    {
+        return 0U;
+    }
+
+    return motor_slice_duration - elapsed_ms;
 }
 
 void MOTOR_SetSpeed(int16_t speed_percent)
