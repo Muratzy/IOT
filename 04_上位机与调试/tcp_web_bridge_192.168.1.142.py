@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 import threading
 import time
@@ -45,7 +46,44 @@ latest = {
 }
 lock = threading.Lock()
 client_lock = threading.Lock()
+service_lock = threading.Lock()
+shutdown_event = threading.Event()
+tcp_ready = threading.Event()
 active_client = None
+tcp_listener = None
+web_httpd = None
+tcp_start_error = None
+instance_mutex = None
+
+
+def acquire_single_instance():
+    """Prevent two Windows bridge processes from sharing ports 1000/8000."""
+    global instance_mutex
+
+    if os.name != "nt":
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_mutex = kernel32.CreateMutexW
+    create_mutex.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    create_mutex.restype = wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+
+    mutex = create_mutex(None, False, "Local\\IOTCM_CH9121_WebBridge")
+    if not mutex:
+        raise OSError(ctypes.get_last_error(), "无法创建桥接服务单实例锁")
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        close_handle(mutex)
+        raise SystemExit(
+            "[ERROR] 已有网页桥接服务正在运行。请在网页右上角点击“关闭服务”后再启动。"
+        )
+
+    instance_mutex = (kernel32, mutex)
 
 
 def temperature_status(code: int) -> str:
@@ -196,18 +234,78 @@ def send_pump_command(duty: int, duration_ms: int):
     return True, "命令已发送，等待 STM32 确认"
 
 
-def tcp_server():
+def shutdown_service():
+    """Close the module connection and both listeners, then end the process."""
     global active_client
 
+    if shutdown_event.is_set():
+        return
+
+    shutdown_event.set()
+    print("[SERVICE] 正在关闭网页桥接服务")
+
+    with client_lock:
+        conn = active_client
+        active_client = None
+
+    if conn is not None:
+        try:
+            conn.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        conn.close()
+
+    with service_lock:
+        listener = tcp_listener
+        httpd = web_httpd
+
+    if listener is not None:
+        listener.close()
+    if httpd is not None:
+        httpd.shutdown()
+
+
+def delayed_shutdown():
+    time.sleep(0.15)
+    shutdown_service()
+
+
+def tcp_server():
+    global active_client, tcp_listener, tcp_start_error
+
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((TCP_HOST, TCP_PORT))
-    server.listen(1)
+    if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    else:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    try:
+        server.bind((TCP_HOST, TCP_PORT))
+        server.listen(1)
+    except OSError as error:
+        tcp_start_error = error
+        server.close()
+        tcp_ready.set()
+        return
+
+    with service_lock:
+        tcp_listener = server
+    tcp_ready.set()
 
     print(f"[TCP] Listening on {TCP_HOST}:{TCP_PORT}")
 
-    while True:
-        conn, addr = server.accept()
+    while not shutdown_event.is_set():
+        try:
+            conn, addr = server.accept()
+        except OSError:
+            if shutdown_event.is_set():
+                break
+            raise
+
+        if shutdown_event.is_set():
+            conn.close()
+            break
+
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         print(f"[TCP] Connected: {addr}")
 
@@ -223,7 +321,7 @@ def tcp_server():
         buffer = ""
 
         try:
-            while True:
+            while not shutdown_event.is_set():
                 data = conn.recv(1024)
                 if not data:
                     break
@@ -263,8 +361,9 @@ def tcp_server():
                         latest["has_data"] = True
                         latest["received_frames"] += 1
 
-        except ConnectionError:
-            pass
+        except OSError as error:
+            if not shutdown_event.is_set():
+                print(f"[TCP] Connection error: {error}")
         finally:
             with client_lock:
                 if active_client is conn:
@@ -275,6 +374,25 @@ def tcp_server():
                 latest["client_ip"] = ""
                 latest["pump_command_status"] = "disconnected"
             print("[TCP] Disconnected")
+
+    with service_lock:
+        if tcp_listener is server:
+            tcp_listener = None
+    server.close()
+    print("[TCP] Stopped")
+
+
+class BridgeHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(
+                socket.SOL_SOCKET,
+                socket.SO_EXCLUSIVEADDRUSE,
+                1,
+            )
+        super().server_bind()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -315,6 +433,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_POST(self):
+        if self.path == "/api/shutdown":
+            if self.headers.get("X-IOTCM-Action") != "shutdown":
+                self.send_json(403, {
+                    "ok": False,
+                    "message": "关闭请求缺少本地页面标识",
+                })
+                return
+            self.send_json(200, {
+                "ok": True,
+                "message": "桥接服务正在关闭",
+            })
+            threading.Thread(target=delayed_shutdown, daemon=True).start()
+            return
+
         if self.path != "/api/pump":
             self.send_error(404)
             return
@@ -371,12 +503,35 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def web_server():
-    httpd = ThreadingHTTPServer((WEB_HOST, WEB_PORT), Handler)
+    global web_httpd
+
+    httpd = BridgeHTTPServer((WEB_HOST, WEB_PORT), Handler)
+    with service_lock:
+        web_httpd = httpd
+
     print(f"[WEB] Local: http://127.0.0.1:{WEB_PORT}")
     print(f"[WEB] LAN:   http://192.168.1.142:{WEB_PORT}")
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    finally:
+        httpd.server_close()
+        with service_lock:
+            if web_httpd is httpd:
+                web_httpd = None
+        print("[WEB] Stopped")
 
 
 if __name__ == "__main__":
+    acquire_single_instance()
     threading.Thread(target=tcp_server, daemon=True).start()
-    web_server()
+    if not tcp_ready.wait(3.0):
+        raise SystemExit("[ERROR] TCP 服务启动超时")
+    if tcp_start_error is not None:
+        raise SystemExit(f"[ERROR] 无法监听 TCP {TCP_PORT}：{tcp_start_error}")
+
+    try:
+        web_server()
+    except KeyboardInterrupt:
+        print("\n[SERVICE] 收到终止请求")
+    finally:
+        shutdown_service()

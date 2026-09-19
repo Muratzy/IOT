@@ -54,6 +54,11 @@
       letter-spacing: -.035em;
     }
     .subtitle { margin-top: 9px; color: var(--muted); font-size: 14px; }
+    .header-actions {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+    }
     .connection {
       display: flex;
       align-items: center;
@@ -76,6 +81,20 @@
     .dot.online { background: var(--green); box-shadow: 0 0 16px rgba(77, 221, 145, .75); }
     .connection strong { display: block; font-size: 14px; }
     .connection small { color: var(--muted); font-size: 12px; }
+    .service-stop-button {
+      min-width: 96px;
+      padding: 0 15px;
+      border: 1px solid rgba(255, 119, 131, .45);
+      border-radius: 14px;
+      color: var(--red);
+      background: rgba(255, 119, 131, .08);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .service-stop-button:hover { border-color: var(--red); background: rgba(255, 119, 131, .14); }
+    .service-stop-button:disabled { opacity: .55; cursor: default; }
     .measurements {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -335,7 +354,8 @@
     @media (max-width: 590px) {
       .shell { width: min(100% - 24px, 1240px); padding-top: 22px; }
       header { flex-direction: column; }
-      .connection { width: 100%; }
+      .header-actions { width: 100%; }
+      .connection { flex: 1; min-width: 0; }
       .measurements, .diag-grid { grid-template-columns: 1fr; }
       .trend-controls { width: 100%; }
     }
@@ -349,9 +369,12 @@
         <h1>液路实时监测</h1>
         <div class="subtitle">网页字段与 OLED 四行信息保持一致</div>
       </div>
-      <div class="connection">
-        <span id="connectionDot" class="dot"></span>
-        <div><strong id="connectionText">等待 CH9121</strong><small id="connectionDetail">TCP :1000</small></div>
+      <div class="header-actions">
+        <div class="connection">
+          <span id="connectionDot" class="dot"></span>
+          <div><strong id="connectionText">等待 CH9121</strong><small id="connectionDetail">TCP :1000</small></div>
+        </div>
+        <button id="serviceStop" class="service-stop-button" type="button" title="关闭当前 Python 网页桥接进程">关闭服务</button>
       </div>
     </header>
 
@@ -604,6 +627,7 @@
     let refreshBusy = false;
     let lastApiData = null;
     let apiReachable = false;
+    let serviceStopping = false;
     let historyDescending = true;
     let chartMode = "live";
     let chartLayout = "split";
@@ -1142,7 +1166,7 @@
     }
 
     async function refresh() {
-      if (refreshBusy) return;
+      if (refreshBusy || serviceStopping) return;
       refreshBusy = true;
       try {
         const response = await fetch("/api/data", { cache: "no-store" });
@@ -1208,6 +1232,34 @@
       refreshCharts(true);
     });
     el("refreshNow").addEventListener("click", () => { refresh(); refreshCharts(true); showHistory(); });
+    el("serviceStop").addEventListener("click", async () => {
+      if (serviceStopping) return;
+      if (!window.confirm("确认关闭当前 Python 网页桥接服务？关闭后需要重新运行桥接脚本才能恢复数据。")) return;
+
+      const button = el("serviceStop");
+      button.disabled = true;
+      button.textContent = "正在关闭…";
+
+      try {
+        const response = await fetch("/api/shutdown", {
+          method: "POST",
+          headers: { "X-IOTCM-Action": "shutdown" }
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.message || `HTTP ${response.status}`);
+
+        serviceStopping = true;
+        apiReachable = false;
+        el("connectionDot").classList.remove("online");
+        el("connectionText").textContent = "服务已关闭";
+        el("connectionDetail").textContent = "重新运行桥接脚本后刷新页面";
+        button.textContent = "已关闭";
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "关闭服务";
+        window.alert(`关闭失败：${error.message}`);
+      }
+    });
     let pumpDuty = 0;
     function setPumpDuty(value) {
       pumpDuty = Math.round(Math.max(0, Math.min(100, Number(value) || 0)));

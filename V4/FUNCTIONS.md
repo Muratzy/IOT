@@ -70,8 +70,10 @@
 | `parse_pump_ack()` | 解析 STM32 的 `PUMP_ACK` 确认。 |
 | `send_pump_command()` | 通过当前 CH9121 TCP 连接向 STM32 下发命令。 |
 | `tcp_server()` | 在 TCP 1000 接受 CH9121 连接并拆分串口文本行。 |
+| `acquire_single_instance()` | 使用 Windows 命名互斥量阻止第二个桥接进程启动。 |
+| `shutdown_service()` | 关闭 CH9121 Socket、TCP 监听和 HTTP 服务。 |
 | `Handler.do_POST()` | 校验 `/api/pump` 请求并调用命令发送函数。 |
-| `web_server()` | 在 HTTP 8000 提供网页、`/api/data` 和 `/api/pump`。 |
+| `web_server()` | 在 HTTP 8000 提供网页、`/api/data`、`/api/pump` 和 `/api/shutdown`。 |
 | `cli_monitor.fetch_data()` | 从 `/api/data` 获取最新数据，不占用 CH9121 TCP 连接。 |
 
 网页显示 STM32 实际 PWM、运行状态、剩余时间和最后一次 ACK，而不是只显示本地设定值。
