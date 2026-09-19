@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IOTCM 实时数据</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #08111f;
+      --panel: rgba(16, 30, 51, .88);
+      --line: rgba(151, 181, 218, .16);
+      --text: #f3f7ff;
+      --muted: #91a5bf;
+      --cyan: #59e0d0;
+      --green: #4ddd91;
+      --yellow: #ffc968;
+      --red: #ff7783;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(42, 132, 220, .20), transparent 34%),
+        radial-gradient(circle at 88% 0%, rgba(41, 197, 177, .12), transparent 30%),
+        linear-gradient(145deg, #07101c, #0a1627 55%, #091321);
+    }
+    .shell {
+      width: min(1240px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 34px 0 30px;
+    }
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    .eyebrow {
+      margin-bottom: 8px;
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 42px);
+      letter-spacing: -.035em;
+    }
+    .subtitle { margin-top: 9px; color: var(--muted); font-size: 14px; }
+    .connection {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-width: 220px;
+      padding: 12px 15px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(11, 23, 40, .76);
+      box-shadow: 0 14px 40px rgba(0, 0, 0, .16);
+    }
+    .dot {
+      flex: 0 0 auto;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--yellow);
+      box-shadow: 0 0 16px rgba(255, 201, 104, .7);
+    }
+    .dot.online { background: var(--green); box-shadow: 0 0 16px rgba(77, 221, 145, .75); }
+    .connection strong { display: block; font-size: 14px; }
+    .connection small { color: var(--muted); font-size: 12px; }
+    .measurements {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .card, .diagnostics, .raw-frame {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(19, 39, 65, .92), var(--panel));
+      box-shadow: 0 18px 55px rgba(0, 0, 0, .18);
+      backdrop-filter: blur(12px);
+    }
+    .card {
+      position: relative;
+      min-height: 206px;
+      padding: 21px;
+      overflow: hidden;
+      border-radius: 18px;
+    }
+    .card::after {
+      content: "";
+      position: absolute;
+      width: 140px;
+      height: 140px;
+      right: -55px;
+      bottom: -70px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(88, 184, 255, .18), transparent 68%);
+      pointer-events: none;
+    }
+    .card-top, .section-title, .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .label { color: var(--muted); font-size: 13px; }
+    .badge {
+      padding: 4px 8px;
+      border: 1px solid rgba(77, 221, 145, .28);
+      border-radius: 999px;
+      color: var(--green);
+      background: rgba(77, 221, 145, .08);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .badge.wait {
+      color: var(--yellow);
+      border-color: rgba(255, 201, 104, .28);
+      background: rgba(255, 201, 104, .08);
+    }
+    .badge.error {
+      color: var(--red);
+      border-color: rgba(255, 119, 131, .28);
+      background: rgba(255, 119, 131, .08);
+    }
+    .reading {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-top: 30px;
+      white-space: nowrap;
+    }
+    .number {
+      font-size: clamp(35px, 4vw, 50px);
+      font-weight: 720;
+      line-height: 1;
+      letter-spacing: -.055em;
+      font-variant-numeric: tabular-nums;
+    }
+    .unit { color: var(--muted); font-size: 14px; }
+    .meta { margin-top: 24px; color: var(--muted); font-size: 12px; }
+    .lower-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .diagnostics, .raw-frame { border-radius: 18px; padding: 20px 22px; }
+    .section-title { margin-bottom: 17px; font-size: 14px; font-weight: 700; }
+    .section-title span { color: var(--muted); font-size: 11px; font-weight: 400; }
+    .diag-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .diag-item {
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(7, 17, 31, .42);
+    }
+    .diag-item small { display: block; color: var(--muted); margin-bottom: 8px; }
+    .diag-item strong { font: 700 25px/1 Consolas, monospace; color: #dff2ff; }
+    code {
+      display: block;
+      min-height: 72px;
+      color: #cceaff;
+      font: 13px/1.65 Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    .footer { margin-top: 15px; color: var(--muted); font-size: 12px; }
+    .trend-section, .history-section, .control-section {
+      margin-top: 16px;
+      padding: 20px 22px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(19, 39, 65, .92), var(--panel));
+      box-shadow: 0 18px 55px rgba(0, 0, 0, .18);
+    }
+    .section-heading, .history-controls, .pager {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .section-heading h2 { margin: 0; font-size: 18px; }
+    .section-hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+    .trend-controls, .quick-ranges {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .trend-controls label { color: var(--muted); font-size: 12px; }
+    .trend-controls button, .quick-ranges button, .history-table th button {
+      min-height: 34px;
+      padding: 6px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      background: #0b1c30;
+      font: inherit;
+      cursor: pointer;
+    }
+    .trend-controls button:hover, .quick-ranges button:hover,
+    .history-table th button:hover { border-color: var(--cyan); }
+    .trend-controls button[aria-pressed="true"] { border-color: var(--cyan); background: rgba(39, 191, 222, .16); }
+    .trend-controls button[disabled] { opacity: .45; cursor: default; }
+    .quick-ranges { margin-top: 17px; }
+    .quick-ranges button.active { border-color: var(--cyan); }
+    .sample-inspector {
+      margin-top: 13px;
+      min-height: 34px;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--muted);
+      background: rgba(7, 17, 31, .4);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .trend-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      margin-top: 17px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(7, 17, 31, .48);
+    }
+    .trend-card {
+      display: grid;
+      grid-template-columns: minmax(130px, 190px) minmax(0, 1fr);
+      grid-template-rows: auto auto;
+      align-content: center;
+      align-items: center;
+      column-gap: 14px;
+      min-width: 0;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .trend-card:last-child { border-bottom: 0; }
+    .trend-title { grid-column: 1; display: flex; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 700; }
+    .trend-unit { color: var(--muted); font-size: 12px; font-weight: 400; }
+    .legend { grid-column: 1; display: flex; gap: 13px; min-height: 24px; margin-top: 9px; color: var(--muted); font-size: 11px; }
+    .legend span::before { content: ""; display: inline-block; width: 13px; height: 3px; margin: 0 5px 3px 0; border-radius: 3px; background: currentColor; }
+    .legend .t1 { color: var(--cyan); }
+    .legend .t2 { color: var(--yellow); }
+    .legend .flow { color: var(--green); }
+    .legend .pressure { color: #88adff; }
+    .trend-card canvas { grid-column: 2; grid-row: 1 / span 2; display: block; width: 100%; height: 160px; }
+    .trend-grid[hidden], .combined-chart[hidden] { display: none; }
+    .combined-chart {
+      margin-top: 17px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(7, 17, 31, .48);
+    }
+    .combined-chart .legend { flex-wrap: wrap; margin: 0 0 10px; }
+    .combined-chart canvas { display: block; width: 100%; height: 320px; }
+    .combined-scale { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; margin-top: 17px; }
+    .control-card { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: rgba(7, 17, 31, .48); }
+    .control-card h3 { margin: 0; font-size: 15px; }
+    .control-card p, .control-note { color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .control-card p { margin: 8px 0 16px; }
+    .control-readout { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+    .control-readout output { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .control-readout span { color: var(--muted); font-size: 12px; }
+    .control-card input[type="range"] { display: block; width: 100%; margin: 8px 0 15px; accent-color: var(--cyan); cursor: pointer; }
+    .pump-time-input {
+      display: flex; align-items: center; gap: 9px; margin: 14px 0;
+      color: var(--muted); font-size: 12px;
+    }
+    .pump-time-input input {
+      width: 130px; min-height: 38px; padding: 7px 10px;
+      border: 1px solid var(--line); border-radius: 8px;
+      color: var(--text); background: #0b1c30; font: inherit;
+    }
+    .pump-live-state { min-height: 93px; }
+    .pump-live-state strong { display: block; margin-top: 6px; font-size: 23px; }
+    .control-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .control-actions button {
+      min-height: 34px; padding: 6px 10px; border: 1px solid var(--line);
+      border-radius: 8px; color: var(--text); background: #0b1c30; font: inherit; cursor: pointer;
+    }
+    .control-actions button:hover { border-color: var(--cyan); }
+    .control-actions button.primary { border-color: var(--cyan); }
+    .control-actions button.stop { border-color: rgba(255, 119, 131, .55); color: var(--red); }
+    .control-actions button:disabled { opacity: .45; cursor: default; }
+    .control-actions button[aria-pressed="true"] { border-color: var(--cyan); background: rgba(39, 191, 222, .16); }
+    .control-note { min-height: 20px; margin: 13px 0 0; }
+    .history-controls { justify-content: flex-start; margin: 17px 0 13px; }
+    .history-controls label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+    .history-controls input, .section-heading select, .history-controls button, .pager button {
+      min-height: 34px;
+      padding: 6px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      background: #0b1c30;
+      font: inherit;
+    }
+    .history-controls button, .pager button { cursor: pointer; }
+    .history-controls button:hover, .pager button:hover { border-color: var(--cyan); }
+    .pager button:disabled { opacity: .4; cursor: default; }
+    .table-wrap { overflow-x: auto; }
+    .history-table { width: 100%; border-collapse: collapse; white-space: nowrap; font-size: 13px; }
+    .history-table th, .history-table td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+    .history-table th { color: var(--muted); font-weight: 500; }
+    .history-table td { font-variant-numeric: tabular-nums; }
+    .history-table th button { min-height: 27px; padding: 3px 7px; color: var(--muted); }
+    .pager { margin-top: 13px; color: var(--muted); font-size: 12px; }
+    .pager > div { display: flex; align-items: center; gap: 9px; }
+    @media (max-width: 980px) {
+      .measurements { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .lower-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      .control-grid { grid-template-columns: 1fr; }
+      .trend-card { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+      .trend-card canvas { grid-column: 1; grid-row: 3; height: 155px; }
+      .combined-chart canvas { height: 250px; }
+    }
+    @media (max-width: 590px) {
+      .shell { width: min(100% - 24px, 1240px); padding-top: 22px; }
+      header { flex-direction: column; }
+      .connection { width: 100%; }
+      .measurements, .diag-grid { grid-template-columns: 1fr; }
+      .trend-controls { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">STM32F401 · CH9121</div>
+        <h1>液路实时监测</h1>
+        <div class="subtitle">网页字段与 OLED 四行信息保持一致</div>
+      </div>
+      <div class="connection">
+        <span id="connectionDot" class="dot"></span>
+        <div><strong id="connectionText">等待 CH9121</strong><small id="connectionDetail">TCP :1000</small></div>
+      </div>
+    </header>
+
+    <section class="measurements">
+      <article class="card">
+        <div class="card-top"><div class="label">T1 · PB6 温度</div><span id="t1Badge" class="badge wait">等待</span></div>
+        <div class="reading"><strong id="t1" class="number">--.-</strong><span class="unit">°C</span></div>
+        <div class="meta">DS18B20 · OLED 第一行左侧</div>
+      </article>
+      <article class="card">
+        <div class="card-top"><div class="label">T2 · PB7 温度</div><span id="t2Badge" class="badge wait">等待</span></div>
+        <div class="reading"><strong id="t2" class="number">--.-</strong><span class="unit">°C</span></div>
+        <div class="meta">DS18B20 · OLED 第一行右侧</div>
+      </article>
+      <article class="card">
+        <div class="card-top"><div class="label">Flow · 流量</div><span id="flowBadge" class="badge wait">等待</span></div>
+        <div class="reading"><strong id="flow" class="number">--.--</strong><span class="unit">L/min</span></div>
+        <div class="meta">PA0 / TIM2_CH1 · OLED 第二行</div>
+      </article>
+      <article class="card">
+        <div class="card-top"><div class="label">P · 水压</div><span id="pressureBadge" class="badge wait">等待</span></div>
+        <div class="reading"><strong id="pressure" class="number">-------</strong><span class="unit">Pa</span></div>
+        <div id="pressureMpa" class="meta">--.------ MPa · OLED 第三行</div>
+      </article>
+    </section>
+
+    <section class="lower-grid">
+      <div class="diagnostics">
+        <div class="section-title">压力 ADC 诊断 <span>OLED 第四行</span></div>
+        <div class="diag-grid">
+          <div class="diag-item"><small>A · PA1 当前值</small><strong id="adc">----</strong></div>
+          <div class="diag-item"><small>D · 相对零点差值</small><strong id="delta">-----</strong></div>
+          <div class="diag-item"><small>接收帧数</small><strong id="frames">0</strong></div>
+        </div>
+      </div>
+      <div class="raw-frame">
+        <div class="section-title">最近一帧 <span id="frameVersion">等待数据</span></div>
+        <code id="raw">尚未收到串口数据</code>
+      </div>
+    </section>
+
+    <section class="trend-section" aria-labelledby="trendTitle">
+      <div class="section-heading">
+        <div><h2 id="trendTitle">实时趋势</h2><p id="chartHint" class="section-hint">温度、流量、压力共用一个图表区域和时间范围；温度轨包含 T1 与 T2。</p></div>
+        <div class="trend-controls">
+          <button id="chartLayoutToggle" type="button" aria-pressed="false" aria-controls="trendGrid combinedChartPanel">合并成一张图</button>
+          <label>查看范围 <select id="chartRange">
+            <option value="5">最近 5 分钟</option>
+            <option value="30">最近 30 分钟</option>
+            <option value="120">最近 2 小时</option>
+            <option value="1440">最近 24 小时</option>
+          </select></label>
+          <button id="chartPause" type="button" title="暂停图表滚动；数据仍会继续记录">暂停图表</button>
+          <button id="chartBackLive" type="button" hidden>返回实时</button>
+          <button id="refreshNow" type="button">立即刷新</button>
+        </div>
+      </div>
+      <div id="trendGrid" class="trend-grid">
+        <div class="trend-card"><div class="trend-title">温度趋势 <span class="trend-unit">°C</span></div><div class="legend"><span class="t1">T1</span><span class="t2">T2</span></div><canvas id="temperatureChart" aria-label="双路温度趋势图" role="img"></canvas></div>
+        <div class="trend-card"><div class="trend-title">流量趋势 <span class="trend-unit">L/min</span></div><div class="legend"><span class="flow">瞬时流量</span></div><canvas id="flowChart" aria-label="流量趋势图" role="img"></canvas></div>
+        <div class="trend-card"><div class="trend-title">压力趋势 <span class="trend-unit">Pa</span></div><div class="legend"><span class="pressure">水压</span></div><canvas id="pressureChart" aria-label="压力趋势图" role="img"></canvas></div>
+      </div>
+      <div id="combinedChartPanel" class="combined-chart" hidden>
+        <div class="legend" aria-label="叠加趋势图图例"><span class="t1">温度 T1 · °C</span><span class="t2">温度 T2 · °C</span><span class="flow">流量 · L/min</span><span class="pressure">压力 · Pa</span></div>
+        <canvas id="combinedChart" aria-label="温度、流量、压力叠加趋势图；各指标分别按自身范围缩放" role="img"></canvas>
+        <p id="combinedScale" class="combined-scale">各指标按自身数值范围独立缩放至 0–100%；悬停可查看原始读数。</p>
+      </div>
+      <div id="sampleInspector" class="sample-inspector" aria-live="polite">将鼠标移到图上可同时查看三图同一时刻的读数；点击可锁定。</div>
+    </section>
+
+    <section class="control-section" aria-labelledby="controlTitle">
+      <div class="section-heading">
+        <div><h2 id="controlTitle">水泵控制</h2><p class="section-hint">设置 PWM 占空比和运行时间，通过 CH9121 下发到 STM32；0% 表示立即关闭。</p></div>
+        <span id="pumpControlBadge" class="badge wait">等待 STM32</span>
+      </div>
+      <div class="control-grid">
+        <div class="control-card">
+          <h3>水泵 PWM</h3>
+          <p>当前传感器流量：<strong id="controlFlow">--.--</strong> L/min</p>
+          <div class="control-readout"><output id="pumpDutyOutput" for="pumpDutySlider">0%</output><span>0% 关闭，100% 满占空比</span></div>
+          <input id="pumpDutySlider" type="range" min="0" max="100" step="1" value="0" aria-label="水泵 PWM 占空比">
+          <div class="control-actions">
+            <button type="button" data-pump-preset="0">0%</button>
+            <button type="button" data-pump-preset="25">25%</button>
+            <button type="button" data-pump-preset="50">50%</button>
+            <button type="button" data-pump-preset="75">75%</button>
+            <button type="button" data-pump-preset="100">100%</button>
+          </div>
+        </div>
+        <div class="control-card">
+          <h3>运行时间与执行状态</h3>
+          <label class="pump-time-input">运行时间
+            <input id="pumpDurationSeconds" type="number" min="0.1" max="3600" step="0.1" value="2" inputmode="decimal">
+            秒
+          </label>
+          <div class="pump-live-state">
+            <span class="label">STM32 实际状态</span>
+            <strong id="pumpActualState">等待状态帧</strong>
+            <div id="pumpRemaining" class="control-note">实际 PWM --% · 剩余 -- 秒</div>
+          </div>
+          <div class="control-actions">
+            <button id="pumpApply" class="primary" type="button">发送到 STM32</button>
+            <button id="pumpStop" class="stop" type="button">立即关闭</button>
+          </div>
+          <div id="pumpFeedback" class="control-note" role="status">尚未发送水泵命令。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="history-section" aria-labelledby="historyTitle">
+      <div class="section-heading">
+        <div><h2 id="historyTitle">历史记录</h2><p id="historyStorageNote" class="section-hint">本浏览器自动保存接收到的采样，约每秒一条；清除浏览器网站数据会删除记录。</p></div>
+      </div>
+      <div class="quick-ranges" aria-label="快捷时间范围">
+        <button type="button" data-history-range="60">最近 1 小时</button>
+        <button type="button" data-history-range="1440">最近 24 小时</button>
+        <button type="button" data-history-range="today">今天</button>
+      </div>
+      <div class="history-controls">
+        <label>开始时间 <input id="historyStart" type="datetime-local"></label>
+        <label>结束时间 <input id="historyEnd" type="datetime-local"></label>
+        <button id="historySearch" type="button">查询</button>
+        <button id="historyReset" type="button">全部记录</button>
+        <button id="historyToCharts" type="button">在趋势图中查看</button>
+        <button id="historyExport" type="button">导出 CSV</button>
+      </div>
+      <div class="table-wrap"><table class="history-table">
+        <thead><tr><th><button id="historySort" type="button" title="切换时间排序">接收时间 ↓</button></th><th>T1 / °C</th><th>T2 / °C</th><th>流量 / L/min</th><th>压力 / Pa</th></tr></thead>
+        <tbody id="historyRows"><tr><td colspan="5">正在读取历史记录…</td></tr></tbody>
+      </table></div>
+      <div class="pager"><span id="historyCount">--</span><div><button id="historyPrev" type="button">上一页</button><span id="historyPage">第 1 页</span><button id="historyNext" type="button">下一页</button></div></div>
+    </section>
+
+    <div class="footer"><span>来源：<span id="clientIp">--</span></span><span>最后更新：<span id="updatedAt">--</span></span></div>
+  </main>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    const statusText = {
+      ok: "正常", wait: "等待", busy: "转换中", no_device: "未连接",
+      crc_error: "CRC错误", invalid_parameter: "参数错误", adc_error: "ADC错误",
+      sensor_error: "传感器错误", timer_error: "定时器错误",
+      unavailable: "旧帧无此项", error: "错误"
+    };
+
+    function setBadge(id, status) {
+      const badge = el(id);
+      badge.textContent = statusText[status] || status || "未知";
+      badge.className = "badge";
+      if (status !== "ok") {
+        badge.classList.add(["wait", "busy", "unavailable"].includes(status) ? "wait" : "error");
+      }
+    }
+
+    function sensorValue(value, status, digits) {
+      return status === "ok" && Number.isFinite(Number(value))
+        ? Number(value).toFixed(digits)
+        : digits === 1 ? "--.-" : "--.--";
+    }
+
+    function updateConnection(data) {
+      const age = Date.now() - Number(data.updated_ms || 0);
+      const fresh = data.connected && data.has_data && age >= 0 && age < 3000;
+      el("connectionDot").classList.toggle("online", fresh);
+      el("connectionText").textContent = fresh ? "数据在线" :
+        (data.connected && data.has_data ? "数据已停更" :
+          (data.connected ? "已连接，等待数据" : "等待 CH9121"));
+      const source = data.client_ip ? `${data.client_ip} → TCP :1000` : "TCP :1000";
+      el("connectionDetail").textContent = data.connected && data.has_data && !fresh
+        ? `${source} · ${Math.floor(age / 1000)} 秒未更新` : source;
+    }
+
+    function renderPumpState(data) {
+      const stateText = {
+        stopped: "已关闭",
+        running: "运行中",
+        done: "运行完成",
+        error: "状态错误"
+      };
+      const commandText = {
+        idle: "尚未发送水泵命令。",
+        sent: "命令已发送，等待 STM32 确认。",
+        accepted: "STM32 已确认并执行命令。",
+        rejected: "STM32 拒绝了命令。",
+        disconnected: "CH9121 未连接，无法下发命令。"
+      };
+      const pumpState = data.pump_status || "stopped";
+      const actualDuty = Number(data.pump_duty || 0);
+      const remainingMs = Number(data.pump_remaining_ms || 0);
+      const badge = el("pumpControlBadge");
+
+      el("pumpActualState").textContent = stateText[pumpState] || "等待状态帧";
+      el("pumpRemaining").textContent =
+        `实际 PWM ${actualDuty}% · 剩余 ${(remainingMs / 1000).toFixed(1)} 秒`;
+      badge.textContent = pumpState === "running" ? `运行中 · ${actualDuty}%` :
+        (pumpState === "done" ? "运行完成" : "水泵已关闭");
+      badge.className = "badge";
+      if (pumpState !== "running") badge.classList.add("wait");
+
+      if (data.pump_command_status && commandText[data.pump_command_status]) {
+        const suffix = data.pump_command_at ? ` · ${data.pump_command_at}` : "";
+        el("pumpFeedback").textContent = commandText[data.pump_command_status] + suffix;
+      }
+    }
+
+    function render(data) {
+      updateConnection(data);
+      setBadge("t1Badge", data.temperature1_status);
+      setBadge("t2Badge", data.temperature2_status);
+      setBadge("flowBadge", data.flow_status);
+      setBadge("pressureBadge", data.pressure_status);
+      el("t1").textContent = sensorValue(data.temperature1, data.temperature1_status, 1);
+      el("t2").textContent = sensorValue(data.temperature2, data.temperature2_status, 1);
+      el("flow").textContent = sensorValue(data.flow, data.flow_status, 2);
+      el("controlFlow").textContent = sensorValue(data.flow, data.flow_status, 2);
+
+      const pressureOK = data.pressure_status === "ok" && Number.isFinite(Number(data.pressure_pa));
+      el("pressure").textContent = pressureOK ? String(Math.round(data.pressure_pa)).padStart(7, "0") : "-------";
+      el("pressureMpa").textContent = pressureOK
+        ? `${Number(data.pressure_mpa).toFixed(6)} MPa · OLED 第三行`
+        : "--.------ MPa · OLED 第三行";
+      el("adc").textContent = data.pressure_adc == null ? "----" : String(data.pressure_adc).padStart(4, "0");
+      if (data.pressure_delta == null) {
+        el("delta").textContent = "-----";
+      } else {
+        const delta = Number(data.pressure_delta);
+        el("delta").textContent = `${delta < 0 ? "-" : "+"}${String(Math.abs(delta)).padStart(4, "0")}`;
+      }
+      el("frames").textContent = Number(data.received_frames || 0).toLocaleString("zh-CN");
+      el("raw").textContent = data.raw || "尚未收到串口数据";
+      el("frameVersion").textContent = data.frame_version === 3 ? "含水泵状态帧 v3" :
+        (data.frame_version === 2 ? "OLED 同步帧 v2" :
+          (data.frame_version === 1 ? "兼容旧固件帧" : "等待数据"));
+      el("clientIp").textContent = data.client_ip || "--";
+      el("updatedAt").textContent = data.updated_at || "--";
+      renderPumpState(data);
+    }
+
+    const HISTORY_DB = "iotcm-v3-history";
+    const HISTORY_PAGE_SIZE = 20;
+    let historyDb = null;
+    let memoryHistory = [];
+    let lastFrameKey = "";
+    let lastSavedAt = 0;
+    let historyPage = 0;
+    let historyQueryId = 0;
+    let chartQueryId = 0;
+    let currentChartSamples = [];
+    let currentChartBounds = [Date.now() - 300000, Date.now()];
+    let refreshBusy = false;
+    let lastApiData = null;
+    let apiReachable = false;
+    let historyDescending = true;
+    let chartMode = "live";
+    let chartLayout = "split";
+    let chartPaused = false;
+    let historicalChartBounds = null;
+    let inspectedTime = null;
+    let inspectionPinned = false;
+
+    function validReading(value, status) {
+      const number = Number(value);
+      return status === "ok" && value !== null && value !== undefined && Number.isFinite(number)
+        ? number : null;
+    }
+
+    function openHistory() {
+      return new Promise((resolve) => {
+        if (!window.indexedDB) { resolve(false); return; }
+        const request = indexedDB.open(HISTORY_DB, 1);
+        request.onupgradeneeded = () => {
+          const store = request.result.createObjectStore("samples", { keyPath: "id", autoIncrement: true });
+          store.createIndex("timestamp", "timestamp");
+          store.createIndex("frameKey", "frameKey", { unique: true });
+        };
+        request.onerror = () => resolve(false);
+        request.onsuccess = () => {
+          historyDb = request.result;
+          const cursorRequest = historyDb.transaction("samples").objectStore("samples")
+            .index("timestamp").openCursor(null, "prev");
+          cursorRequest.onsuccess = () => {
+            if (cursorRequest.result) {
+              lastSavedAt = cursorRequest.result.value.timestamp;
+              lastFrameKey = cursorRequest.result.value.frameKey;
+            }
+            resolve(true);
+          };
+          cursorRequest.onerror = () => resolve(true);
+        };
+      });
+    }
+
+    function saveSample(sample) {
+      if (!historyDb) {
+        memoryHistory.push(sample);
+        if (memoryHistory.length > 10000) memoryHistory.shift();
+        return Promise.resolve(true);
+      }
+      return new Promise((resolve) => {
+        const transaction = historyDb.transaction("samples", "readwrite");
+        const request = transaction.objectStore("samples").add(sample);
+        request.onsuccess = () => resolve(true);
+        request.onerror = (event) => {
+          event.preventDefault();
+          resolve(false);
+        };
+        transaction.onabort = () => resolve(false);
+      });
+    }
+
+    async function rememberFrame(data) {
+      if (!data.has_data || !Number.isFinite(Number(data.updated_ms)) || !data.updated_ms) return;
+      const frameKey = `${data.updated_ms}:${data.received_frames}:${data.raw}`;
+      if (frameKey === lastFrameKey) return;
+      lastFrameKey = frameKey;
+      const now = Date.now();
+      if (now - lastSavedAt < 1000) return;
+      lastSavedAt = now;
+
+      const sample = {
+        timestamp: now,
+        frameKey,
+        temperature1: validReading(data.temperature1, data.temperature1_status),
+        temperature2: validReading(data.temperature2, data.temperature2_status),
+        flow: validReading(data.flow, data.flow_status),
+        pressure_pa: validReading(data.pressure_pa, data.pressure_status)
+      };
+      const saved = await saveSample(sample);
+      if (!saved) el("historyStorageNote").textContent = "历史数据写入失败，请检查浏览器存储空间。";
+    }
+
+    function timeRange() {
+      const startInput = el("historyStart").value;
+      const endInput = el("historyEnd").value;
+      const start = startInput ? new Date(startInput).getTime() : 0;
+      const end = endInput ? new Date(endInput).getTime() + 59999 : Number.MAX_SAFE_INTEGER;
+      return Number.isFinite(start) && Number.isFinite(end) && start <= end ? [start, end] : null;
+    }
+
+    function countHistory(start, end) {
+      if (!historyDb) {
+        return Promise.resolve(memoryHistory.filter((item) => item.timestamp >= start && item.timestamp <= end).length);
+      }
+      return new Promise((resolve, reject) => {
+        const request = historyDb.transaction("samples").objectStore("samples")
+          .index("timestamp").count(IDBKeyRange.bound(start, end));
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function readHistoryPage(start, end, offset) {
+      if (!historyDb) {
+        const matching = memoryHistory.filter((item) => item.timestamp >= start && item.timestamp <= end);
+        return Promise.resolve((historyDescending ? matching.reverse() : matching)
+          .slice(offset, offset + HISTORY_PAGE_SIZE));
+      }
+      return new Promise((resolve, reject) => {
+        const rows = [];
+        let advanced = false;
+        const request = historyDb.transaction("samples").objectStore("samples")
+          .index("timestamp").openCursor(IDBKeyRange.bound(start, end), historyDescending ? "prev" : "next");
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor || rows.length === HISTORY_PAGE_SIZE) { resolve(rows); return; }
+          if (offset && !advanced) { advanced = true; cursor.advance(offset); return; }
+          rows.push(cursor.value);
+          cursor.continue();
+        };
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function formatHistoryValue(value, digits) {
+      return value === null || value === undefined ? "—" : Number(value).toFixed(digits);
+    }
+
+    async function showHistory() {
+      const queryId = ++historyQueryId;
+      const range = timeRange();
+      if (!range) {
+        el("historyCount").textContent = "时间范围无效";
+        return;
+      }
+      try {
+        const total = await countHistory(...range);
+        historyPage = Math.min(historyPage, Math.max(0, Math.ceil(total / HISTORY_PAGE_SIZE) - 1));
+        const records = await readHistoryPage(...range, historyPage * HISTORY_PAGE_SIZE);
+        if (queryId !== historyQueryId) return;
+        const body = el("historyRows");
+        body.replaceChildren();
+        if (!records.length) {
+          const row = body.insertRow();
+          const cell = row.insertCell();
+          cell.colSpan = 5;
+          cell.textContent = "该时间段没有记录";
+        }
+        for (const sample of records) {
+          const row = body.insertRow();
+          const values = [
+            new Date(sample.timestamp).toLocaleString("zh-CN", { hour12: false }),
+            formatHistoryValue(sample.temperature1, 1),
+            formatHistoryValue(sample.temperature2, 1),
+            formatHistoryValue(sample.flow, 2),
+            formatHistoryValue(sample.pressure_pa, 0)
+          ];
+          for (const value of values) row.insertCell().textContent = value;
+        }
+        el("historyCount").textContent = `共 ${total.toLocaleString("zh-CN")} 条`;
+        el("historyPage").textContent = `第 ${historyPage + 1} / ${Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE))} 页`;
+        el("historySort").textContent = historyDescending ? "接收时间 ↓" : "接收时间 ↑";
+        el("historyPrev").disabled = historyPage === 0;
+        el("historyNext").disabled = (historyPage + 1) * HISTORY_PAGE_SIZE >= total;
+      } catch (error) {
+        el("historyCount").textContent = "读取历史失败";
+      }
+    }
+
+    function readChartSamples(start, end) {
+      if (!historyDb) {
+        const matching = memoryHistory.filter((sample) => sample.timestamp >= start && sample.timestamp <= end);
+        const step = Math.max(1, Math.ceil(matching.length / 240));
+        return Promise.resolve(matching.filter((_, index) => index % step === 0));
+      }
+      return new Promise((resolve, reject) => {
+        const index = historyDb.transaction("samples").objectStore("samples").index("timestamp");
+        const range = IDBKeyRange.bound(start, end);
+        const countRequest = index.count(range);
+        countRequest.onerror = () => reject(countRequest.error);
+        countRequest.onsuccess = () => {
+          const step = Math.max(1, Math.ceil(countRequest.result / 240));
+          const points = [];
+          const cursorRequest = index.openCursor(range);
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result;
+            if (!cursor) { resolve(points); return; }
+            points.push(cursor.value);
+            if (step === 1) cursor.continue();
+            else cursor.advance(step);
+          };
+          cursorRequest.onerror = () => reject(cursorRequest.error);
+        };
+      });
+    }
+
+    function readHistoryForExport(start, end) {
+      if (!historyDb) {
+        return Promise.resolve(memoryHistory.filter((sample) => sample.timestamp >= start && sample.timestamp <= end));
+      }
+      return new Promise((resolve, reject) => {
+        const rows = [];
+        const request = historyDb.transaction("samples").objectStore("samples")
+          .index("timestamp").openCursor(IDBKeyRange.bound(start, end));
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) { resolve(rows); return; }
+          rows.push(cursor.value);
+          cursor.continue();
+        };
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function exportHistory() {
+      const range = timeRange();
+      if (!range) { el("historyCount").textContent = "时间范围无效"; return; }
+      const button = el("historyExport");
+      button.disabled = true;
+      button.textContent = "正在导出…";
+      try {
+        const rows = await readHistoryForExport(...range);
+        if (!rows.length) { button.textContent = "没有可导出的记录"; return; }
+        const quote = (value) => `"${String(value).replaceAll('"', '""')}"`;
+        const lines = ["接收时间,T1 (°C),T2 (°C),流量 (L/min),压力 (Pa)"];
+        for (const sample of rows) {
+          lines.push([
+            new Date(sample.timestamp).toLocaleString("zh-CN", { hour12: false }),
+            sample.temperature1 ?? "", sample.temperature2 ?? "",
+            sample.flow ?? "", sample.pressure_pa ?? ""
+          ].map(quote).join(","));
+        }
+        const blob = new Blob(["\ufeff", lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `IOTCM_历史记录_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        button.textContent = `已导出 ${rows.length} 条`;
+      } catch (error) {
+        button.textContent = "导出失败";
+      } finally {
+        button.disabled = false;
+        setTimeout(() => { button.textContent = "导出 CSV"; }, 2500);
+      }
+    }
+
+    function localDateInput(timestamp) {
+      const date = new Date(timestamp);
+      return new Date(timestamp - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    }
+
+    function setQuickRange(value) {
+      const now = Date.now();
+      const start = value === "today" ? new Date().setHours(0, 0, 0, 0) : now - Number(value) * 60000;
+      el("historyStart").value = localDateInput(start);
+      el("historyEnd").value = localDateInput(now);
+      document.querySelectorAll("[data-history-range]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.historyRange === value);
+      });
+      historyPage = 0;
+      showHistory();
+    }
+
+    function showHistoryOnCharts() {
+      if (!el("historyStart").value || !el("historyEnd").value || !timeRange()) {
+        el("historyCount").textContent = "请先选择有效的开始和结束时间";
+        return;
+      }
+      historicalChartBounds = timeRange();
+      chartMode = "history";
+      chartPaused = false;
+      el("chartRange").disabled = true;
+      el("chartPause").disabled = true;
+      el("chartBackLive").hidden = false;
+      el("trendTitle").textContent = "历史趋势";
+      refreshCharts(true);
+      el("trendTitle").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function drawChart(canvasId, samples, start, end, series, digits, nonNegative) {
+      const canvas = el(canvasId);
+      const width = Math.max(canvas.clientWidth, 220);
+      const height = canvas.clientHeight || 185;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      const context = canvas.getContext("2d");
+      context.scale(ratio, ratio);
+      const left = 45, right = width - 10, top = 12, bottom = height - 25;
+      const readings = samples.flatMap((sample) => series.map((line) => sample[line.key]))
+        .filter((value) => value !== null && Number.isFinite(value));
+      let minimum = readings.length ? Math.min(...readings) : 0;
+      let maximum = readings.length ? Math.max(...readings) : 1;
+      const padding = Math.max((maximum - minimum) * 0.12, digits === 0 ? 1 : 0.05);
+      minimum -= padding;
+      maximum += padding;
+      if (nonNegative) minimum = Math.max(0, minimum);
+      if (maximum <= minimum) maximum = minimum + 1;
+
+      context.font = "11px Consolas, monospace";
+      context.fillStyle = "#91a5bf";
+      context.strokeStyle = "rgba(151, 181, 218, .15)";
+      context.lineWidth = 1;
+      for (let line = 0; line <= 3; line += 1) {
+        const y = top + (bottom - top) * line / 3;
+        const value = maximum - (maximum - minimum) * line / 3;
+        context.beginPath();
+        context.moveTo(left, y);
+        context.lineTo(right, y);
+        context.stroke();
+        context.fillText(value.toFixed(digits), 2, y + 4);
+      }
+      const timeLabel = (value) => new Date(value).toLocaleString("zh-CN", end - start > 4 * 3600000
+        ? { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }
+        : { hour: "2-digit", minute: "2-digit" });
+      context.fillText(timeLabel(start), left, height - 5);
+      const endLabel = timeLabel(end);
+      context.fillText(endLabel, right - context.measureText(endLabel).width, height - 5);
+      if (!readings.length) {
+        context.fillText("暂无数据", Math.max(left, width / 2 - 25), height / 2);
+        return;
+      }
+
+      for (const line of series) {
+        context.beginPath();
+        context.strokeStyle = line.color;
+        context.lineWidth = 2.2;
+        context.lineJoin = "round";
+        let active = false;
+        for (const sample of samples) {
+          const value = sample[line.key];
+          if (value === null || !Number.isFinite(value)) { active = false; continue; }
+          const x = left + (right - left) * (sample.timestamp - start) / (end - start);
+          const y = bottom - (bottom - top) * (value - minimum) / (maximum - minimum);
+          if (!active) context.moveTo(x, y);
+          else context.lineTo(x, y);
+          active = true;
+        }
+        context.stroke();
+      }
+      if (inspectedTime !== null && samples.length) {
+        const selected = samples.reduce((best, sample) =>
+          Math.abs(sample.timestamp - inspectedTime) < Math.abs(best.timestamp - inspectedTime) ? sample : best);
+        const x = left + (right - left) * (selected.timestamp - start) / (end - start);
+        context.save();
+        context.strokeStyle = "rgba(243, 247, 255, .65)";
+        context.lineWidth = 1;
+        context.setLineDash([4, 4]);
+        context.beginPath();
+        context.moveTo(x, top);
+        context.lineTo(x, bottom);
+        context.stroke();
+        context.setLineDash([]);
+        for (const line of series) {
+          const value = selected[line.key];
+          if (value === null || !Number.isFinite(value)) continue;
+          const y = bottom - (bottom - top) * (value - minimum) / (maximum - minimum);
+          context.beginPath();
+          context.arc(x, y, 4, 0, Math.PI * 2);
+          context.fillStyle = line.color;
+          context.fill();
+        }
+        context.restore();
+      }
+    }
+
+    function drawCombinedChart() {
+      const canvas = el("combinedChart");
+      const width = Math.max(canvas.clientWidth, 220);
+      const height = canvas.clientHeight || 320;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      const context = canvas.getContext("2d");
+      context.scale(ratio, ratio);
+      const left = 45, right = width - 10, top = 12, bottom = height - 25;
+      const [start, end] = currentChartBounds;
+      const rangeFor = (keys, digits, nonNegative) => {
+        const values = currentChartSamples.flatMap((sample) => keys.map((key) => sample[key]))
+          .filter((value) => value !== null && Number.isFinite(value));
+        if (!values.length) return null;
+        let min = Math.min(...values), max = Math.max(...values);
+        const padding = Math.max((max - min) * 0.12, digits === 0 ? 1 : 0.05);
+        min -= padding;
+        max += padding;
+        if (nonNegative) min = Math.max(0, min);
+        if (max <= min) max = min + 1;
+        return { min, max };
+      };
+      const temperature = rangeFor(["temperature1", "temperature2"], 1, false);
+      const flow = rangeFor(["flow"], 2, true);
+      const pressure = rangeFor(["pressure_pa"], 0, true);
+      const describe = (range, digits, unit) => range
+        ? `${range.min.toFixed(digits)}–${range.max.toFixed(digits)} ${unit}` : `暂无 ${unit} 数据`;
+      el("combinedScale").textContent = `各指标独立缩放至 0–100%：温度 ${describe(temperature, 1, "°C")} · 流量 ${describe(flow, 2, "L/min")} · 压力 ${describe(pressure, 0, "Pa")}。悬停查看原始读数。`;
+
+      context.font = "11px Consolas, monospace";
+      context.fillStyle = "#91a5bf";
+      context.strokeStyle = "rgba(151, 181, 218, .15)";
+      context.lineWidth = 1;
+      for (let line = 0; line <= 4; line += 1) {
+        const y = top + (bottom - top) * line / 4;
+        context.beginPath();
+        context.moveTo(left, y);
+        context.lineTo(right, y);
+        context.stroke();
+        context.fillText(`${100 - line * 25}%`, 2, y + 4);
+      }
+      const timeLabel = (value) => new Date(value).toLocaleString("zh-CN", end - start > 4 * 3600000
+        ? { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }
+        : { hour: "2-digit", minute: "2-digit" });
+      context.fillText(timeLabel(start), left, height - 5);
+      const endLabel = timeLabel(end);
+      context.fillText(endLabel, right - context.measureText(endLabel).width, height - 5);
+      const lines = [
+        { key: "temperature1", color: "#59e0d0", range: temperature },
+        { key: "temperature2", color: "#ffc968", range: temperature },
+        { key: "flow", color: "#4ddd91", range: flow },
+        { key: "pressure_pa", color: "#88adff", range: pressure }
+      ];
+      if (!lines.some((line) => line.range)) {
+        context.fillText("暂无数据", Math.max(left, width / 2 - 25), height / 2);
+        return;
+      }
+      const xFor = (sample) => left + (right - left) * (sample.timestamp - start) / (end - start);
+      const yFor = (value, range) => bottom - (bottom - top) * (value - range.min) / (range.max - range.min);
+      for (const line of lines) {
+        if (!line.range) continue;
+        context.beginPath();
+        context.strokeStyle = line.color;
+        context.lineWidth = 2.2;
+        context.lineJoin = "round";
+        let active = false, lastPoint = null;
+        for (const sample of currentChartSamples) {
+          const value = sample[line.key];
+          if (value === null || !Number.isFinite(value)) { active = false; continue; }
+          const x = xFor(sample), y = yFor(value, line.range);
+          if (!active) context.moveTo(x, y);
+          else context.lineTo(x, y);
+          active = true;
+          lastPoint = [x, y];
+        }
+        context.stroke();
+        if (lastPoint) {
+          context.beginPath();
+          context.arc(lastPoint[0], lastPoint[1], 2.5, 0, Math.PI * 2);
+          context.fillStyle = line.color;
+          context.fill();
+        }
+      }
+      if (inspectedTime !== null && currentChartSamples.length) {
+        const selected = currentChartSamples.reduce((best, sample) =>
+          Math.abs(sample.timestamp - inspectedTime) < Math.abs(best.timestamp - inspectedTime) ? sample : best);
+        const x = xFor(selected);
+        context.save();
+        context.strokeStyle = "rgba(243, 247, 255, .65)";
+        context.lineWidth = 1;
+        context.setLineDash([4, 4]);
+        context.beginPath();
+        context.moveTo(x, top);
+        context.lineTo(x, bottom);
+        context.stroke();
+        context.setLineDash([]);
+        for (const line of lines) {
+          const value = selected[line.key];
+          if (!line.range || value === null || !Number.isFinite(value)) continue;
+          context.beginPath();
+          context.arc(x, yFor(value, line.range), 4, 0, Math.PI * 2);
+          context.fillStyle = line.color;
+          context.fill();
+        }
+        context.restore();
+      }
+    }
+
+    function paintCharts() {
+      if (chartLayout === "combined") { drawCombinedChart(); return; }
+      const [start, end] = currentChartBounds;
+      drawChart("temperatureChart", currentChartSamples, start, end,
+        [{ key: "temperature1", color: "#59e0d0" }, { key: "temperature2", color: "#ffc968" }], 1, false);
+      drawChart("flowChart", currentChartSamples, start, end,
+        [{ key: "flow", color: "#4ddd91" }], 2, true);
+      drawChart("pressureChart", currentChartSamples, start, end,
+        [{ key: "pressure_pa", color: "#88adff" }], 0, true);
+    }
+
+    function updateInspector() {
+      const sample = currentChartSamples.find((item) => item.timestamp === inspectedTime);
+      if (!sample) {
+        el("sampleInspector").textContent = chartLayout === "combined"
+          ? "将鼠标移到叠加图上查看温度、流量、压力的原始读数；点击可锁定。"
+          : "将鼠标移到图上可同时查看三图同一时刻的读数；点击可锁定。";
+        return;
+      }
+      el("sampleInspector").textContent = [
+        new Date(sample.timestamp).toLocaleString("zh-CN", { hour12: false }),
+        `T1 ${formatHistoryValue(sample.temperature1, 1)} °C`,
+        `T2 ${formatHistoryValue(sample.temperature2, 1)} °C`,
+        `流量 ${formatHistoryValue(sample.flow, 2)} L/min`,
+        `压力 ${formatHistoryValue(sample.pressure_pa, 0)} Pa`,
+        inspectionPinned ? "已锁定 · 点击图表或按 Esc 取消" : "点击图表锁定"
+      ].join("  ·  ");
+    }
+
+    function inspectAtPointer(event) {
+      if (!currentChartSamples.length) return;
+      const canvas = event.currentTarget;
+      const x = event.clientX - canvas.getBoundingClientRect().left;
+      const fraction = Math.min(1, Math.max(0, (x - 45) / (canvas.clientWidth - 55)));
+      const target = currentChartBounds[0] + fraction * (currentChartBounds[1] - currentChartBounds[0]);
+      const nearest = currentChartSamples.reduce((best, sample) =>
+        Math.abs(sample.timestamp - target) < Math.abs(best.timestamp - target) ? sample : best);
+      inspectedTime = nearest.timestamp;
+      updateInspector();
+      paintCharts();
+    }
+
+    async function refreshCharts(force = false) {
+      if (!force && (chartPaused || chartMode === "history")) return;
+      const queryId = ++chartQueryId;
+      const end = chartMode === "history" ? historicalChartBounds[1] : Date.now();
+      const start = chartMode === "history" ? historicalChartBounds[0] : end - Number(el("chartRange").value) * 60000;
+      try {
+        const samples = await readChartSamples(start, end);
+        if (queryId !== chartQueryId) return;
+        currentChartSamples = samples;
+        currentChartBounds = [chartMode === "live" && samples.length ? Math.max(start, samples[0].timestamp - 1000) : start, end];
+        if (inspectionPinned && !samples.some((item) => item.timestamp === inspectedTime)) inspectionPinned = false;
+        if (inspectedTime !== null && !samples.some((item) => item.timestamp === inspectedTime)) inspectedTime = null;
+        updateInspector();
+        paintCharts();
+      } catch (error) {
+        el("historyStorageNote").textContent = "趋势数据读取失败，请刷新页面重试。";
+      }
+    }
+
+    async function refresh() {
+      if (refreshBusy) return;
+      refreshBusy = true;
+      try {
+        const response = await fetch("/api/data", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        apiReachable = true;
+        lastApiData = data;
+        render(data);
+        await rememberFrame(data);
+      } catch (error) {
+        apiReachable = false;
+        el("connectionDot").classList.remove("online");
+        el("connectionText").textContent = "本地服务不可用";
+        el("connectionDetail").textContent = "请启动 TCP 接收程序";
+      } finally {
+        refreshBusy = false;
+      }
+    }
+
+    for (const canvasId of ["temperatureChart", "flowChart", "pressureChart", "combinedChart"]) {
+      const canvas = el(canvasId);
+      canvas.addEventListener("pointermove", (event) => { if (!inspectionPinned) inspectAtPointer(event); });
+      canvas.addEventListener("pointerleave", () => {
+        if (!inspectionPinned) { inspectedTime = null; updateInspector(); paintCharts(); }
+      });
+      canvas.addEventListener("click", (event) => {
+        if (inspectionPinned) { inspectionPinned = false; inspectedTime = null; }
+        else { inspectAtPointer(event); inspectionPinned = true; }
+        updateInspector();
+        paintCharts();
+      });
+    }
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && inspectionPinned) {
+        inspectionPinned = false; inspectedTime = null; updateInspector(); paintCharts();
+      }
+    });
+    el("chartRange").addEventListener("change", () => refreshCharts(true));
+    el("chartLayoutToggle").addEventListener("click", () => {
+      chartLayout = chartLayout === "split" ? "combined" : "split";
+      el("trendGrid").hidden = chartLayout === "combined";
+      el("combinedChartPanel").hidden = chartLayout !== "combined";
+      el("chartLayoutToggle").textContent = chartLayout === "combined" ? "显示三张图" : "合并成一张图";
+      el("chartLayoutToggle").setAttribute("aria-pressed", String(chartLayout === "combined"));
+      el("chartHint").textContent = chartLayout === "combined"
+        ? "温度 T1/T2、流量、压力叠加显示；各指标按自身范围独立缩放。"
+        : "温度、流量、压力共用一个图表区域和时间范围；温度轨包含 T1 与 T2。";
+      updateInspector();
+      paintCharts();
+    });
+    el("chartPause").addEventListener("click", () => {
+      chartPaused = !chartPaused;
+      el("chartPause").textContent = chartPaused ? "继续图表" : "暂停图表";
+      if (!chartPaused) refreshCharts(true);
+    });
+    el("chartBackLive").addEventListener("click", () => {
+      chartMode = "live";
+      historicalChartBounds = null;
+      el("chartRange").disabled = false;
+      el("chartPause").disabled = false;
+      el("chartBackLive").hidden = true;
+      el("trendTitle").textContent = "实时趋势";
+      refreshCharts(true);
+    });
+    el("refreshNow").addEventListener("click", () => { refresh(); refreshCharts(true); showHistory(); });
+    let pumpDuty = 0;
+    function setPumpDuty(value) {
+      pumpDuty = Math.round(Math.max(0, Math.min(100, Number(value) || 0)));
+      el("pumpDutySlider").value = String(pumpDuty);
+      el("pumpDutyOutput").textContent = `${pumpDuty}%`;
+      document.querySelectorAll("[data-pump-preset]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(Number(button.dataset.pumpPreset) === pumpDuty));
+      });
+    }
+    async function sendPumpCommand(forceStop = false) {
+      const duty = forceStop ? 0 : pumpDuty;
+      const seconds = Number(el("pumpDurationSeconds").value);
+      if (duty > 0 && (!Number.isFinite(seconds) || seconds <= 0 || seconds > 3600)) {
+        el("pumpFeedback").textContent = "运行时间必须在 0.1~3600 秒之间。";
+        return;
+      }
+
+      const durationMs = duty === 0 ? 0 : Math.round(seconds * 1000);
+      const buttons = [el("pumpApply"), el("pumpStop")];
+      buttons.forEach((button) => { button.disabled = true; });
+      el("pumpFeedback").textContent = "正在发送命令…";
+
+      try {
+        const response = await fetch("/api/pump", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ duty, duration_ms: durationMs })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.message || `HTTP ${response.status}`);
+        if (forceStop) setPumpDuty(0);
+        el("pumpFeedback").textContent = `${result.message} · PWM ${duty}% · ${durationMs} ms`;
+      } catch (error) {
+        el("pumpFeedback").textContent = `发送失败：${error.message}`;
+      } finally {
+        buttons.forEach((button) => { button.disabled = false; });
+      }
+    }
+    el("pumpDutySlider").addEventListener("input", (event) => setPumpDuty(event.target.value));
+    document.querySelectorAll("[data-pump-preset]").forEach((button) => {
+      button.addEventListener("click", () => setPumpDuty(button.dataset.pumpPreset));
+    });
+    el("pumpApply").addEventListener("click", () => sendPumpCommand(false));
+    el("pumpStop").addEventListener("click", () => sendPumpCommand(true));
+    setPumpDuty(0);
+    document.querySelectorAll("[data-history-range]").forEach((button) => {
+      button.addEventListener("click", () => setQuickRange(button.dataset.historyRange));
+    });
+    for (const inputId of ["historyStart", "historyEnd"]) {
+      el(inputId).addEventListener("input", () => {
+        document.querySelectorAll("[data-history-range]").forEach((button) => button.classList.remove("active"));
+      });
+    }
+    el("historySearch").addEventListener("click", () => { historyPage = 0; showHistory(); });
+    el("historyReset").addEventListener("click", () => {
+      el("historyStart").value = "";
+      el("historyEnd").value = "";
+      document.querySelectorAll("[data-history-range]").forEach((button) => button.classList.remove("active"));
+      historyPage = 0;
+      showHistory();
+    });
+    el("historyToCharts").addEventListener("click", showHistoryOnCharts);
+    el("historyExport").addEventListener("click", exportHistory);
+    el("historySort").addEventListener("click", () => {
+      historyDescending = !historyDescending;
+      historyPage = 0;
+      showHistory();
+    });
+    el("historyPrev").addEventListener("click", () => { if (historyPage > 0) { historyPage -= 1; showHistory(); } });
+    el("historyNext").addEventListener("click", () => { historyPage += 1; showHistory(); });
+    window.addEventListener("resize", paintCharts);
+    setInterval(() => { if (apiReachable && lastApiData) updateConnection(lastApiData); }, 1000);
+
+    openHistory().then((persistent) => {
+      if (!persistent) el("historyStorageNote").textContent = "浏览器禁止本地存储：历史记录仅在当前页面有效。";
+      showHistory();
+      refreshCharts();
+      refresh();
+      setInterval(refresh, 250);
+      setInterval(refreshCharts, 2000);
+      setInterval(() => {
+        if (!el("historyStart").value && !el("historyEnd").value && historyPage === 0) showHistory();
+      }, 2000);
+    });
+  </script>
+</body>
+</html>
