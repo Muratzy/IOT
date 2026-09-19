@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IOTCM 实时数据</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #08111f;
+      --panel: rgba(16, 30, 51, .88);
+      --line: rgba(151, 181, 218, .16);
+      --text: #f3f7ff;
+      --muted: #91a5bf;
+      --cyan: #59e0d0;
+      --green: #4ddd91;
+      --yellow: #ffc968;
+      --red: #ff7783;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(42, 132, 220, .20), transparent 34%),
+        radial-gradient(circle at 88% 0%, rgba(41, 197, 177, .12), transparent 30%),
+        linear-gradient(145deg, #07101c, #0a1627 55%, #091321);
+    }
+    .shell {
+      width: min(1240px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 34px 0 30px;
+    }
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    .eyebrow {
+      margin-bottom: 8px;
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 42px);
+      letter-spacing: -.035em;
+    }
+    .subtitle { margin-top: 9px; color: var(--muted); font-size: 14px; }
+    .connection {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-width: 220px;
+      padding: 12px 15px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(11, 23, 40, .76);
+      box-shadow: 0 14px 40px rgba(0, 0, 0, .16);
+    }
+    .dot {
+      flex: 0 0 auto;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--yellow);
+      box-shadow: 0 0 16px rgba(255, 201, 104, .7);
+    }
+    .dot.online { background: var(--green); box-shadow: 0 0 16px rgba(77, 221, 145, .75); }
+    .connection strong { display: block; font-size: 14px; }
+    .connection small { color: var(--muted); font-size: 12px; }
+    .measurements {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .card, .diagnostics, .raw-frame {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(19, 39, 65, .92), var(--panel));
+      box-shadow: 0 18px 55px rgba(0, 0, 0, .18);
+      backdrop-filter: blur(12px);
+    }
+    .card {
+      position: relative;
+      min-height: 206px;
+      padding: 21px;
+      overflow: hidden;
+      border-radius: 18px;
+    }
+    .card::after {
+      content: "";
+      position: absolute;
+      width: 140px;
+      height: 140px;
+      right: -55px;
+      bottom: -70px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(88, 184, 255, .18), transparent 68%);
+      pointer-events: none;
+    }
+    .card-top, .section-title, .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .label { color: var(--muted); font-size: 13px; }
+    .badge {
+      padding: 4px 8px;
+      border: 1px solid rgba(77, 221, 145, .28);
+      border-radius: 999px;
+      color: var(--green);
+      background: rgba(77, 221, 145, .08);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .badge.wait {
+      color: var(--yellow);
+      border-color: rgba(255, 201, 104, .28);
+      background: rgba(255, 201, 104, .08);
+    }
+    .badge.error {
+      color: var(--red);
+      border-color: rgba(255, 119, 131, .28);
+      background: rgba(255, 119, 131, .08);
+    }
+    .reading {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-top: 30px;
+      white-space: nowrap;
+    }
+    .number {
+      font-size: clamp(35px, 4vw, 50px);
+      font-weight: 720;
+      line-height: 1;
+      letter-spacing: -.055em;
+      font-variant-numeric: tabular-nums;
+    }
+    .unit { color: var(--muted); font-size: 14px; }
+    .meta { margin-top: 24px; color: var(--muted); font-size: 12px; }
+    .lower-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .diagnostics, .raw-frame { border-radius: 18px; padding: 20px 22px; }
+    .section-title { margin-bottom: 17px; font-size: 14px; font-weight: 700; }
+    .section-title span { color: var(--muted); font-size: 11px; font-weight: 400; }
+    .diag-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .diag-item {
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(7, 17, 31, .42);
+    }
+    .diag-item small { display: block; color: var(--muted); margin-bottom: 8px; }
+    .diag-item strong { font: 700 25px/1 Consolas, monospace; color: #dff2ff; }
+    code {
+      display: block;
+      min-height: 72px;
+      color: #cceaff;
+      font: 13px/1.65 Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    .footer { margin-top: 15px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 980px) {
+      .measurements { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .lower-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 590px) {
+      .shell { width: min(100% - 24px, 1240px); padding-top: 22px; }
+      header { flex-direction: column; }
+      .connection { width: 100%; }
+      .measurements, .diag-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">STM32F401 · CH9121</div>
+        <h1>液路实时监测</h1>
+        <div class="subtitle">网页字段与 OLED 四行信息保持一致</div>
+      </div>
+      <div class="connection">
+        <span id="connectionDot" class="dot"></span>
+        <div><strong id="connectionText">等待 CH9121</strong><small id="connectionDetail">TCP :1000</small></div>
+      </div>
+    </header>
+
+    <section class="measurements">
+      <article class="card">
+        <div class="card-top"><div class="label">T1 · PB6 温度</div><span id="t1Badge" class="badge wait">等待</span></div>
+        <div class="reading"><strong id="t1" class="number">--.-</strong><span class="unit">°C</span></div>
+        <div class="meta">DS18B20 · OLED 第一行左侧</div>
+      </article>
+      <article class="card">
+        <div class="card-top"><div class="label">T2 · PB7 温度</div><span id="t2Badge" class="badge wait">等待</span></div>
+        <div class="reading"><strong id="t2" class="number">--.-</strong><span class="unit">°C</span></div>
+        <div class="meta">DS18B20 · OLED 第一行右侧</div>
+      </article>
+      <article class="card">
+        <div class="card-top"><div class="label">Flow · 流量</div><span id="flowBadge" class="badge wait">等待</span></div>
+        <div class="reading"><strong id="flow" class="number">--.--</strong><span class="unit">L/min</span></div>
+        <div class="meta">PA0 / TIM2_CH1 · OLED 第二行</div>
+      </article>
+      <article class="card">
+        <div class="card-top"><div class="label">P · 水压</div><span id="pressureBadge" class="badge wait">等待</span></div>
+        <div class="reading"><strong id="pressure" class="number">-------</strong><span class="unit">Pa</span></div>
+        <div id="pressureMpa" class="meta">--.------ MPa · OLED 第三行</div>
+      </article>
+    </section>
+
+    <section class="lower-grid">
+      <div class="diagnostics">
+        <div class="section-title">压力 ADC 诊断 <span>OLED 第四行</span></div>
+        <div class="diag-grid">
+          <div class="diag-item"><small>A · PA1 当前值</small><strong id="adc">----</strong></div>
+          <div class="diag-item"><small>D · 相对零点差值</small><strong id="delta">-----</strong></div>
+          <div class="diag-item"><small>接收帧数</small><strong id="frames">0</strong></div>
+        </div>
+      </div>
+      <div class="raw-frame">
+        <div class="section-title">最近一帧 <span id="frameVersion">等待数据</span></div>
+        <code id="raw">尚未收到串口数据</code>
+      </div>
+    </section>
+
+    <div class="footer"><span>来源：<span id="clientIp">--</span></span><span>最后更新：<span id="updatedAt">--</span></span></div>
+  </main>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    const statusText = {
+      ok: "正常", wait: "等待", busy: "转换中", no_device: "未连接",
+      crc_error: "CRC错误", invalid_parameter: "参数错误", adc_error: "ADC错误",
+      sensor_error: "传感器错误", timer_error: "定时器错误",
+      unavailable: "旧帧无此项", error: "错误"
+    };
+
+    function setBadge(id, status) {
+      const badge = el(id);
+      badge.textContent = statusText[status] || status || "未知";
+      badge.className = "badge";
+      if (status !== "ok") {
+        badge.classList.add(["wait", "busy", "unavailable"].includes(status) ? "wait" : "error");
+      }
+    }
+
+    function sensorValue(value, status, digits) {
+      return status === "ok" && Number.isFinite(Number(value))
+        ? Number(value).toFixed(digits)
+        : digits === 1 ? "--.-" : "--.--";
+    }
+
+    function render(data) {
+      const online = data.connected && data.has_data;
+      el("connectionDot").classList.toggle("online", online);
+      el("connectionText").textContent = online ? "数据在线" : (data.connected ? "已连接，等待数据" : "等待 CH9121");
+      el("connectionDetail").textContent = data.client_ip ? `${data.client_ip} → TCP :1000` : "TCP :1000";
+      setBadge("t1Badge", data.temperature1_status);
+      setBadge("t2Badge", data.temperature2_status);
+      setBadge("flowBadge", data.flow_status);
+      setBadge("pressureBadge", data.pressure_status);
+      el("t1").textContent = sensorValue(data.temperature1, data.temperature1_status, 1);
+      el("t2").textContent = sensorValue(data.temperature2, data.temperature2_status, 1);
+      el("flow").textContent = sensorValue(data.flow, data.flow_status, 2);
+
+      const pressureOK = data.pressure_status === "ok" && Number.isFinite(Number(data.pressure_pa));
+      el("pressure").textContent = pressureOK ? String(Math.round(data.pressure_pa)).padStart(7, "0") : "-------";
+      el("pressureMpa").textContent = pressureOK
+        ? `${Number(data.pressure_mpa).toFixed(6)} MPa · OLED 第三行`
+        : "--.------ MPa · OLED 第三行";
+      el("adc").textContent = data.pressure_adc == null ? "----" : String(data.pressure_adc).padStart(4, "0");
+      if (data.pressure_delta == null) {
+        el("delta").textContent = "-----";
+      } else {
+        const delta = Number(data.pressure_delta);
+        el("delta").textContent = `${delta < 0 ? "-" : "+"}${String(Math.abs(delta)).padStart(4, "0")}`;
+      }
+      el("frames").textContent = Number(data.received_frames || 0).toLocaleString("zh-CN");
+      el("raw").textContent = data.raw || "尚未收到串口数据";
+      el("frameVersion").textContent = data.frame_version === 2 ? "OLED 同步帧 v2" : (data.frame_version === 1 ? "兼容旧固件帧" : "等待数据");
+      el("clientIp").textContent = data.client_ip || "--";
+      el("updatedAt").textContent = data.updated_at || "--";
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch("/api/data", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        render(await response.json());
+      } catch (error) {
+        el("connectionDot").classList.remove("online");
+        el("connectionText").textContent = "本地服务不可用";
+        el("connectionDetail").textContent = "请启动 TCP 接收程序";
+      }
+    }
+    refresh();
+    setInterval(refresh, 250);
+  </script>
+</body>
+</html>
